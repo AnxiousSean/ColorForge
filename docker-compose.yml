@@ -1,0 +1,42 @@
+# Local development stack: PostgreSQL + the Ortex backend (which serves the
+# embedded web console). For authorized, isolated-lab use only.
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ortex
+      POSTGRES_PASSWORD: ortex
+      POSTGRES_DB: ortex
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ortex -d ortex"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ORTEX_LISTEN_ADDR: ":8080"
+      DATABASE_URL: "postgres://ortex:ortex@postgres:5432/ortex?sslmode=disable"
+      ORTEX_LLM_PROVIDER: "mock"
+      ORTEX_WORKERS: "3"
+      # Demo credentials — CHANGE for any non-throwaway use.
+      # Password below is "ortex-demo" (bcrypt). Regenerate with ./cmd/hashpw.
+      ORTEX_SESSION_SECRET: "dev-only-session-secret-change-me"
+      ORTEX_OPERATOR_USER: "operator"
+      ORTEX_OPERATOR_PASSWORD_HASH: "$$2a$$10$$qkJQre1fpZfxKv0rzZyud.zldXnjaSudC.lKPB1TPsQGrF5bjGkmK"
+    ports:
+      - "8080:8080"
+
+volumes:
+  pgdata:

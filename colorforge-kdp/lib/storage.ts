@@ -5,7 +5,7 @@
  */
 
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
-import { summarize, type Project, type ProjectSummary } from "@/lib/model";
+import { migrateProject, summarize, type Project, type ProjectSummary } from "@/lib/model";
 
 interface ColorForgeDB extends DBSchema {
   projects: { key: string; value: Project };
@@ -38,7 +38,8 @@ export async function saveProject(project: Project): Promise<void> {
 }
 
 export async function loadProject(id: string): Promise<Project | undefined> {
-  return (await db()).get("projects", id);
+  const raw = await (await db()).get("projects", id);
+  return raw ? migrateProject(raw) : undefined;
 }
 
 /** Most recently edited first. */

@@ -7,6 +7,7 @@ import {
   createProject,
   newId,
   type ContentItem,
+  type CoverSettings,
   type NewProjectInput,
   type Project,
   type ProjectSummary,
@@ -37,6 +38,7 @@ interface ProjectsState {
 
   updateMeta(patch: Partial<Pick<Project, "title" | "subtitle" | "author" | "trimSize" | "hasBleed" | "paperType" | "includeFrontMatter">>): void;
   updatePuzzleSettings(patch: Partial<PuzzleSettings>): void;
+  updateCover(patch: Partial<CoverSettings>): void;
   reorderItems(fromId: string, toId: string): void;
   addDesign(): string | null;
   addPuzzle(): string | null;
@@ -140,6 +142,10 @@ export const useProjects = create<ProjectsState>((set, get) => {
       mutate((p) => ({ ...p, ...patch }));
     },
 
+    updateCover(patch) {
+      mutate((p) => ({ ...p, cover: { ...p.cover, ...patch } }));
+    },
+
     updatePuzzleSettings(patch) {
       mutate((p) => {
         if (!p.puzzleSettings) return p;
@@ -239,5 +245,13 @@ export const useProjects = create<ProjectsState>((set, get) => {
 if (typeof window !== "undefined") {
   const flush = () => void useProjects.getState().flush();
   window.addEventListener("pagehide", flush);
+  // A save in flight can be cut off by an immediate unload: start it now and
+  // ask the browser to confirm leaving, which gives it time to finish.
+  window.addEventListener("beforeunload", (e) => {
+    if (useProjects.getState().saveState === "saved") return;
+    flush();
+    e.preventDefault();
+    e.returnValue = "";
+  });
   document.addEventListener("visibilitychange", () => document.visibilityState === "hidden" && flush());
 }

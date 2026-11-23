@@ -19,6 +19,7 @@ import { getPageContext } from "@/lib/layout";
 import { getPageDimensions } from "@/lib/kdp";
 import type { Project } from "@/lib/model";
 import type { ResolvedBook } from "@/lib/pages";
+import { createSvgHost, drawSvgMarkup } from "@/lib/export/svg-pdf";
 
 export type ExportStage = "preparing" | "rendering" | "finalizing" | "verifying" | "done";
 
@@ -40,8 +41,6 @@ export class ExportCancelled extends Error {
     super("Export cancelled");
   }
 }
-
-const SVG_NS = "http://www.w3.org/2000/svg";
 
 export async function exportInterior(
   project: Project,
@@ -65,11 +64,7 @@ export async function exportInterior(
   // smaller than jsPDF's default 16-digit coordinates.
   const pdf = new jsPDF({ unit: "pt", format: [size.widthPt, size.heightPt], orientation, compress: true, putOnlyUsedFonts: true, floatPrecision: 3 });
 
-  // svg2pdf reads computed styles, so the SVG must be in the document.
-  const host = document.createElement("div");
-  host.setAttribute("aria-hidden", "true");
-  host.style.cssText = "position:fixed;left:-100000px;top:0;width:10px;height:10px;overflow:hidden;pointer-events:none;";
-  document.body.appendChild(host);
+  const host = createSvgHost();
 
   const geometry: PageGeometry[] = [];
   try {
@@ -82,16 +77,8 @@ export async function exportInterior(
       const markup = renderToStaticMarkup(
         React.createElement(PageSvg, { project, page, pageCount: total, outlineText: true, showOverlay: false }),
       );
-      const parsed = new DOMParser().parseFromString(markup, "image/svg+xml");
-      const svg = parsed.documentElement;
-      if (svg.namespaceURI !== SVG_NS || svg.querySelector("parsererror")) {
-        throw new Error(`Page ${page.slot.pageNumber} could not be prepared for PDF.`);
-      }
-      const el = document.importNode(svg, true);
-      host.replaceChildren(el);
-
       if (i > 0) pdf.addPage([size.widthPt, size.heightPt], orientation);
-      await svg2pdf(el, pdf, { x: 0, y: 0, width: size.widthPt, height: size.heightPt });
+      await drawSvgMarkup(svg2pdf, pdf, host, markup, size.widthPt, size.heightPt, `Page ${page.slot.pageNumber}`);
 
       report("rendering", i + 1);
       // Yield so the progress bar paints and the tab stays responsive.
@@ -122,15 +109,4 @@ export async function exportInterior(
   };
 }
 
-export function downloadBytes(bytes: Uint8Array, filename: string, type = "application/pdf"): void {
-  const blob = new Blob([bytes as BlobPart], { type });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  // Give the browser time to start the download before revoking.
-  setTimeout(() => URL.revokeObjectURL(url), 60_000);
-}
+export { downloadBytes } from "@/lib/export/download";

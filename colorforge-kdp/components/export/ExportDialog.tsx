@@ -4,8 +4,8 @@ import * as React from "react";
 import { AlertTriangle, CheckCircle2, Download, FileDown, Loader2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
-import { formatBytes } from "@/lib/export/finalize";
-import { ExportCancelled, downloadBytes, exportInterior, type ExportProgress, type ExportResult } from "@/lib/export/interior";
+import { downloadBytes, formatBytes } from "@/lib/export/download";
+import type { ExportProgress, ExportResult } from "@/lib/export/interior";
 import { fontsLoaded, missingGlyphs } from "@/lib/fonts";
 import { PAPER_TYPES, TRIM_SIZES } from "@/lib/kdp";
 import type { Project } from "@/lib/model";
@@ -58,11 +58,14 @@ export function ExportDialog({ project, open, onOpenChange }: { project: Project
     abort.current = new AbortController();
     try {
       await flush();
+      setProgress({ stage: "preparing", done: 0, total: report.pageCount });
+      // The PDF engine loads on first export, keeping the book page light.
+      const { exportInterior } = await import("@/lib/export/interior");
       const r = await exportInterior(project, report.book, { onProgress: setProgress, signal: abort.current.signal });
       setResult(r);
       if (r.verification.ok) downloadBytes(r.bytes, r.filename);
     } catch (e) {
-      if (e instanceof ExportCancelled) setProgress(null);
+      if ((e as Error).message === "Export cancelled") setProgress(null);
       else setError((e as Error).message || "Export failed.");
     }
   }

@@ -14,6 +14,7 @@
  */
 
 import { PDFDict, PDFDocument, PDFName, PDFStream, type PDFObject } from "pdf-lib";
+import { formatBytes } from "@/lib/export/download";
 import { MAX_INTERIOR_FILE_BYTES, PT_PER_INCH, type Dimensions, type Rect } from "@/lib/kdp";
 
 export interface PageGeometry {
@@ -92,14 +93,19 @@ export interface Verification {
 
 const close = (a: number, b: number) => Math.abs(a - b) < 0.01;
 
-export async function verifyInterior(bytes: Uint8Array, geometry: readonly PageGeometry[]): Promise<Verification> {
+export async function verifyInterior(
+  bytes: Uint8Array,
+  geometry: readonly PageGeometry[],
+  options: { requireEvenPages?: boolean } = {},
+): Promise<Verification> {
+  const requireEven = options.requireEvenPages ?? true;
   const doc = await PDFDocument.load(bytes);
   const pages = doc.getPages();
   const checks: VerifyCheck[] = [];
 
   checks.push({
     label: "Page count",
-    ok: pages.length === geometry.length && pages.length % 2 === 0,
+    ok: pages.length === geometry.length && (!requireEven || pages.length % 2 === 0),
     detail: `${pages.length} pages (expected ${geometry.length})`,
   });
 
@@ -123,7 +129,11 @@ export async function verifyInterior(bytes: Uint8Array, geometry: readonly PageG
   checks.push({
     label: "Trim and bleed",
     ok: badTrim.length === 0,
-    detail: badTrim.length ? `Wrong trim box on page(s) ${badTrim.slice(0, 10).join(", ")}` : "Trim box set on every page; bleed only on top, bottom and outside edges",
+    detail: badTrim.length
+      ? `Wrong trim box on page(s) ${badTrim.slice(0, 10).join(", ")}`
+      : requireEven
+        ? "Trim box set on every page; bleed only on top, bottom and outside edges"
+        : "Trim box set; 0.125\" bleed on all four sides",
   });
 
   let fonts = 0;
@@ -145,11 +155,7 @@ export async function verifyInterior(bytes: Uint8Array, geometry: readonly PageG
   return { ok: checks.every((c) => c.ok), checks, pageCount: pages.length, fileBytes: bytes.byteLength };
 }
 
-export function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / 1024 / 1024).toFixed(1)} MB`;
-}
+export { formatBytes } from "@/lib/export/download";
 
 export function interiorFilename(title: string, trimLabel: string, hasBleed: boolean): string {
   const slug =

@@ -31,7 +31,7 @@ const PUZZLE_FONT = cssFontStack("sans");
  * Print mode: every glyph is drawn as a vector path instead of <text>, so
  * the PDF contains no fonts at all.
  */
-const OutlineContext = React.createContext(false);
+export const OutlineContext = React.createContext(false);
 
 const deg = (rad: number | undefined) => ((rad ?? 0) * 180) / Math.PI;
 const n = (v: number) => Number(v.toFixed(4));
@@ -76,6 +76,17 @@ export function ShapeSvg({ shape }: { shape: Shape }) {
     }
     case "polygon":
       return <polygon points={polygonVertices(shape).map(([x, y]) => `${n(x)},${n(y)}`).join(" ")} {...common} />;
+    case "trace": {
+      const k = shape.width / shape.srcWidth;
+      return (
+        <path
+          d={shape.pathData}
+          fill={stroke}
+          fillRule="evenodd"
+          transform={`translate(${n(shape.x)} ${n(shape.y)}) scale(${Number(k.toPrecision(6))})`}
+        />
+      );
+    }
     case "text":
       if (outlined) return <path d={textToPathData(shape.text, shape.x, shape.y, shape.fontSize, shape.font, 400)} fill={stroke} />;
       return (
@@ -86,10 +97,10 @@ export function ShapeSvg({ shape }: { shape: Shape }) {
   }
 }
 
-function Text({ box, family = PUZZLE_FONT }: { box: TextBox; family?: string }) {
+export function Text({ box, family = PUZZLE_FONT, fill = INK, transform }: { box: TextBox; family?: string; fill?: string; transform?: string }) {
   const outlined = React.useContext(OutlineContext);
   if (outlined) {
-    return <path d={textToPathData(box.text, box.x, box.y, box.size, "sans", box.weight === "bold" ? 700 : 400, box.anchor)} fill={INK} />;
+    return <path d={textToPathData(box.text, box.x, box.y, box.size, "sans", box.weight === "bold" ? 700 : 400, box.anchor)} fill={fill} transform={transform} />;
   }
   return (
     <text
@@ -99,14 +110,15 @@ function Text({ box, family = PUZZLE_FONT }: { box: TextBox; family?: string }) 
       fontFamily={family}
       fontWeight={box.weight === "bold" ? 700 : 400}
       textAnchor={box.anchor}
-      fill={INK}
+      fill={fill}
+      transform={transform}
     >
       {box.text}
     </text>
   );
 }
 
-function Grid({ grid, puzzle, solution }: { grid: GridLayout; puzzle: SearchPuzzle; solution?: boolean }) {
+export function Grid({ grid, puzzle, solution }: { grid: GridLayout; puzzle: SearchPuzzle; solution?: boolean }) {
   const outlined = React.useContext(OutlineContext);
   const frame = FRAME_RATIO * grid.cell;
   return (

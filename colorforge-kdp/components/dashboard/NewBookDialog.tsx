@@ -10,7 +10,8 @@ import { KdpTerm } from "@/components/KdpTerm";
 import { BOOK_PROFILES, planBook, type BookType } from "@/lib/book-types";
 import { TRIM_SIZES, type TrimSizeId } from "@/lib/kdp";
 import { createDesign, newId, type ContentItem, type PuzzleSettings } from "@/lib/model";
-import { buildPuzzleItems, maxAnswerLength, parseThemes, STARTER_THEMES } from "@/lib/puzzles/themes";
+import { buildPuzzleItems, maxAnswerLength, parseThemes } from "@/lib/puzzles/themes";
+import { LIBRARY_CATEGORIES, THEME_LIBRARY, libraryToText } from "@/lib/puzzles/library";
 import type { Difficulty } from "@/lib/puzzles/search-grid";
 import { cn } from "@/lib/utils";
 import { useProjects } from "@/store/projects";
@@ -41,13 +42,30 @@ export function NewBookDialog({ open, onOpenChange }: { open: boolean; onOpenCha
   const [gridSize, setGridSize] = React.useState(15);
   const [entriesPerPuzzle, setEntriesPerPuzzle] = React.useState(20);
   const [difficulty, setDifficulty] = React.useState<Difficulty>("medium");
-  const [themesText, setThemesText] = React.useState(STARTER_THEMES);
+  const [themesText, setThemesText] = React.useState("");
+  const [selected, setSelected] = React.useState<Set<string>>(() => new Set(THEME_LIBRARY.map((t) => t.title)));
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
   const isPuzzle = type !== "coloring";
   const settings: PuzzleSettings = { rows: gridSize, cols: gridSize, difficulty, entriesPerPuzzle };
-  const themes = React.useMemo(() => (type === "word-search" ? parseThemes(themesText) : []), [type, themesText]);
+  const themes = React.useMemo(
+    () => (type === "word-search" ? [...parseThemes(themesText), ...(selected.size ? parseThemes(libraryToText(selected)) : [])] : []),
+    [type, themesText, selected],
+  );
+  const toggleTheme = (title: string) =>
+    setSelected((cur) => {
+      const next = new Set(cur);
+      if (next.has(title)) next.delete(title);
+      else next.add(title);
+      return next;
+    });
+  const setCategory = (category: string, on: boolean) =>
+    setSelected((cur) => {
+      const next = new Set(cur);
+      for (const t of THEME_LIBRARY) if (t.category === category) (on ? next.add(t.title) : next.delete(t.title));
+      return next;
+    });
   const tooLong = React.useMemo(() => {
     const limit = maxAnswerLength(settings);
     return [...new Set(themes.flatMap((t) => t.entries.filter((e) => e.answer.length > limit).map((e) => e.display)))];
@@ -71,7 +89,7 @@ export function NewBookDialog({ open, onOpenChange }: { open: boolean; onOpenCha
     e.preventDefault();
     setError(null);
     if (type === "word-search" && themes.length === 0) {
-      setError("Add at least one word list.");
+      setError("Pick at least one theme or add your own word list.");
       return;
     }
     setBusy(true);
@@ -204,25 +222,66 @@ export function NewBookDialog({ open, onOpenChange }: { open: boolean; onOpenCha
           )}
 
           {type === "word-search" && (
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <div className="flex items-end justify-between">
-                <Label htmlFor="nb-themes">Word lists</Label>
-                <button type="button" className="text-xs text-neutral-500 underline" onClick={() => setThemesText(STARTER_THEMES)}>
-                  Reset to starter themes
-                </button>
+                <Label>Themes from the library</Label>
+                <div className="flex gap-3 text-xs text-neutral-500">
+                  <button type="button" className="underline" onClick={() => setSelected(new Set(THEME_LIBRARY.map((t) => t.title)))}>
+                    All
+                  </button>
+                  <button type="button" className="underline" onClick={() => setSelected(new Set())}>
+                    None
+                  </button>
+                </div>
               </div>
+              <div className="max-h-48 space-y-2 overflow-y-auto rounded-md border border-neutral-200 p-2">
+                {LIBRARY_CATEGORIES.map((cat) => {
+                  const inCat = THEME_LIBRARY.filter((t) => t.category === cat);
+                  const all = inCat.every((t) => selected.has(t.title));
+                  return (
+                    <div key={cat}>
+                      <label className="flex items-center gap-2 text-xs font-semibold text-neutral-700">
+                        <input type="checkbox" checked={all} onChange={(e) => setCategory(cat, e.target.checked)} /> {cat}
+                      </label>
+                      <div className="mt-1 flex flex-wrap gap-1 pl-5">
+                        {inCat.map((t) => (
+                          <button
+                            type="button"
+                            key={t.title}
+                            aria-pressed={selected.has(t.title)}
+                            onClick={() => toggleTheme(t.title)}
+                            className={cn(
+                              "rounded-full border px-2 py-0.5 text-[11px]",
+                              selected.has(t.title) ? "border-neutral-900 bg-neutral-900 text-white" : "border-neutral-300 text-neutral-600",
+                            )}
+                          >
+                            {t.title}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <Label htmlFor="nb-themes">Your own word lists (optional)</Label>
               <Textarea
                 id="nb-themes"
-                className="h-40 font-mono text-xs"
+                className="h-24 font-mono text-xs"
                 value={themesText}
                 onChange={(e) => setThemesText(e.target.value)}
+                placeholder={"# My Theme\nword, word, word"}
                 spellCheck={false}
               />
               <p className="text-xs text-neutral-500">
-                Start each theme with a <code># Heading</code> line, then words separated by commas or new lines. {themes.length} theme
-                {themes.length === 1 ? "" : "s"}, {themes.reduce((n, t) => n + t.entries.length, 0)} words. Puzzles cycle through the
-                themes without repeating words until a theme runs out.
+                Start each theme with a <code># Heading</code> line, then words separated by commas or new lines. Using {themes.length} theme
+                {themes.length === 1 ? "" : "s"}, {themes.reduce((n, t) => n + t.entries.length, 0)} words. Puzzles cycle through the themes without repeating
+                words until a theme runs out.
               </p>
+              {count > themes.length * 2 && themes.length > 0 && (
+                <p className="text-xs text-amber-700">
+                  {count} puzzles from {themes.length} theme{themes.length === 1 ? "" : "s"} means words will repeat a lot. Add more themes for variety.
+                </p>
+              )}
               {tooLong.length > 0 && (
                 <p className="text-xs text-amber-700">
                   Too long for a {gridSize} × {gridSize} grid, so they will be skipped: {tooLong.slice(0, 8).join(", ")}

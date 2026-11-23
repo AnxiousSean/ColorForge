@@ -3,16 +3,16 @@
 import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, ArrowLeft, CheckCircle2, FileDown, Loader2, Plus } from "lucide-react";
+import { ArrowLeft, BookImage, FileDown, Loader2, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import { Tooltip } from "@/components/ui/tooltip";
 import { KdpTerm } from "@/components/KdpTerm";
 import { PageManager } from "@/components/book/PageManager";
 import { ExportDialog } from "@/components/export/ExportDialog";
+import { PreflightPanel } from "@/components/book/PreflightPanel";
 import { BOOK_PROFILES } from "@/lib/book-types";
-import { PAGE_LIMITS, PAPER_TYPES, TRIM_SIZES, getGutterMargin, type PaperType, type TrimSizeId } from "@/lib/kdp";
+import { PAPER_TYPES, TRIM_SIZES, getGutterMargin, type PaperType, type TrimSizeId } from "@/lib/kdp";
 import { resolveBook } from "@/lib/pages";
 import type { Difficulty } from "@/lib/puzzles/search-grid";
 import { useProjects } from "@/store/projects";
@@ -79,6 +79,11 @@ export function BookView({ id }: { id: string | null }) {
               <h1 className="truncate text-xl font-semibold">{project.title}</h1>
             </div>
             <SaveIndicator />
+            <Button asChild variant="outline">
+              <Link href={`/book/cover?id=${encodeURIComponent(project.id)}`}>
+                <BookImage /> Cover
+              </Link>
+            </Button>
             <Button onClick={() => setExporting(true)}>
               <FileDown /> Export PDF
             </Button>
@@ -87,7 +92,7 @@ export function BookView({ id }: { id: string | null }) {
 
           <div className="mt-6 grid gap-6 lg:grid-cols-[300px_1fr]">
             <aside className="space-y-5">
-              <Status book={book} paperType={project.paperType} trimSize={project.trimSize} />
+              <PreflightPanel project={project} />
 
               <section className="space-y-3 rounded-lg border border-neutral-200 bg-white p-4">
                 <h2 className="font-semibold">Book details</h2>
@@ -212,36 +217,5 @@ function Field({ label, children }: { label: React.ReactNode; children: React.Re
       <Label className="text-xs text-neutral-600">{label}</Label>
       {children}
     </div>
-  );
-}
-
-function Status({ book, paperType, trimSize }: { book: ReturnType<typeof resolveBook>; paperType: PaperType; trimSize: TrimSizeId }) {
-  const errors = book.plan.issues.filter((i) => i.severity === "error");
-  const limits = PAGE_LIMITS[trimSize][paperType];
-  const counts = book.pages.reduce(
-    (acc, p) => {
-      if (p.kind === "blank") acc.blank++;
-      else acc.content++;
-      return acc;
-    },
-    { content: 0, blank: 0 },
-  );
-  return (
-    <section className={`rounded-lg border p-4 ${errors.length ? "border-amber-300 bg-amber-50" : "border-emerald-200 bg-emerald-50"}`}>
-      <div className="flex items-center gap-2 font-semibold">
-        {errors.length ? <AlertTriangle className="size-4 text-amber-700" /> : <CheckCircle2 className="size-4 text-emerald-700" />}
-        <KdpTerm term="pageCount">{book.pages.length} pages</KdpTerm>
-      </div>
-      <p className="mt-1 text-xs text-neutral-600">
-        {counts.content} printed, {counts.blank} blank · KDP allows {limits.min}–{limits.max}
-      </p>
-      {errors.length > 0 && (
-        <ul className="mt-2 list-disc space-y-1 pl-4 text-xs text-amber-900">
-          {errors.map((i, k) => (
-            <li key={k}>{i.message}</li>
-          ))}
-        </ul>
-      )}
-    </section>
   );
 }

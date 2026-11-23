@@ -30,7 +30,9 @@ upload limits.
 - [x] Step 3: Vector PDF export. Pages render through svg2pdf.js + jsPDF and are finalized with pdf-lib
       (trim/bleed boxes, metadata, unused-font removal). Text is outlined with the bundled fonts, preflight
       blocks failing books, and the finished file is re-read and verified before download.
-- [ ] Step 4: Preflight report, image-to-line-art tracing, cover wrap export, built-in themed word lists
+- [x] Step 4: Live preflight panel with page links, image-to-line-art tracing (ink and photo-outline
+      modes, fully vector), cover designer with full-wrap PDF (spine from page count, barcode area)
+      and 300 DPI front-cover PNG, 51-theme word library with a theme picker
 
 ## How it fits together
 
@@ -45,11 +47,14 @@ lib/         pure logic, unit-tested (no React)
   storage.ts     IndexedDB persistence
   fonts.ts       bundled fonts: exact metrics + text-to-outline
   preflight.ts   KDP checks that gate export
-  export/        interior.ts (browser render pipeline), finalize.ts (pdf-lib boxes + verification)
+  export/        interior.ts + cover.ts (browser render), finalize.ts (pdf-lib boxes + verification)
+  trace.ts       bitmap -> vector line art (threshold / colour edges, marching squares)
+  cover.ts       cover wrap geometry and layout
+  puzzles/library.ts  51 built-in themes
   puzzles/       seeded word/number search engine + theme parsing
 store/       Zustand: projects (autosave) and editor (tools, undo/redo)
 components/  render/PageSvg.tsx is the single renderer for previews, thumbnails and (Step 3) PDF
-app/         static routes: /, /book?id=, /book/edit?id=&item=
+app/         static routes: /, /book?id=, /book/edit?id=&item=, /book/cover?id=
 ```
 
 ## Export pipeline
@@ -62,6 +67,15 @@ verify: page count, sizes, trim boxes, 0 fonts, 0 raster images, <= 650 MB
 ```
 
 A 120-page large-print word search book exports in about 7 seconds (8 MB).
+
+## Publishing a book
+
+1. **New book** → pick a type and themes (or designs) → Create.
+2. Fix anything the preflight panel flags (each page number links to its editor).
+3. **Export PDF** → upload as the paperback manuscript.
+4. **Cover** → pick colours and art, add a description → **Cover PDF** (upload as
+   "a cover you already have") and **Front PNG** (listing images, Kindle edition).
+   Export the cover last: the spine width depends on the final page count.
 
 ## Scripts
 

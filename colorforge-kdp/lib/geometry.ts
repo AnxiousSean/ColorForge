@@ -123,6 +123,16 @@ export function outline(shape: Shape): { points: Point[]; closed: boolean } {
       return { points: rectCorners(shape), closed: true };
     case "polygon":
       return { points: polygonVertices(shape), closed: true };
+    case "trace":
+      return {
+        points: [
+          [shape.x, shape.y],
+          [shape.x + shape.width, shape.y],
+          [shape.x + shape.width, shape.y + shape.height],
+          [shape.x, shape.y + shape.height],
+        ],
+        closed: true,
+      };
     case "text": {
       const w = measureText(shape.text, shape.fontSize, shape.font, 400);
       const top = shape.y - shape.fontSize * 0.8;
@@ -143,7 +153,7 @@ export function outline(shape: Shape): { points: Point[]; closed: boolean } {
 /** Bounding box including the stroke. */
 export function shapeBounds(shape: Shape): Rect {
   const { points } = outline(shape);
-  const pad = shape.type === "text" ? 0 : shape.strokeWidth / 2;
+  const pad = shape.type === "text" || shape.type === "trace" ? 0 : shape.strokeWidth / 2;
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
@@ -181,7 +191,8 @@ export function distToSegment([px, py]: Point, [ax, ay]: Point, [bx, by]: Point)
 /** True if `point` touches the shape's stroke (within `tolerance` inches). */
 export function hitTest(shape: Shape, point: Point, tolerance: number): boolean {
   const { points, closed } = outline(shape);
-  if (shape.type === "text") return pointInPolygon(point, points);
+  // Filled shapes are hit anywhere inside their box.
+  if (shape.type === "text" || shape.type === "trace") return pointInPolygon(point, points);
   const reach = tolerance + shape.strokeWidth / 2;
   if (points.length === 1) return Math.hypot(point[0] - points[0]![0], point[1] - points[0]![1]) <= reach;
   const segments = closed ? points.length : points.length - 1;
@@ -246,17 +257,18 @@ function transformShape(shape: Shape, center: Point, t: Transform, id: string): 
       return { ...shape, id, cx, cy, rotation: (t.mirror ? Math.PI - shape.rotation : shape.rotation) + t.angle };
     }
     case "text":
+    case "trace":
       return { ...shape, id };
   }
 }
 
 /**
  * The shape plus all its symmetric copies. The original is always first and
- * keeps its id. Text is not repeated.
+ * keeps its id. Text and traced images are not repeated.
  */
 export function symmetryCopies(shape: Shape, symmetry: Symmetry, makeId: () => string): Shape[] {
   const segments = Math.max(1, Math.round(symmetry.segments));
-  if (shape.type === "text" || (segments === 1 && !symmetry.mirror)) return [shape];
+  if (shape.type === "text" || shape.type === "trace" || (segments === 1 && !symmetry.mirror)) return [shape];
   const out: Shape[] = [shape];
   for (let k = 0; k < segments; k++) {
     const angle = (2 * Math.PI * k) / segments;

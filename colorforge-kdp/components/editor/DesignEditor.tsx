@@ -10,6 +10,7 @@ import {
   Eye,
   EyeOff,
   Hexagon,
+  ImagePlus,
   Minus,
   PenLine,
   Redo2,
@@ -27,6 +28,7 @@ import { Switch } from "@/components/ui/switch";
 import { Tooltip } from "@/components/ui/tooltip";
 import { GLOSSARY, KdpTerm } from "@/components/KdpTerm";
 import { SaveIndicator } from "@/components/book/BookView";
+import { ImportImageDialog } from "@/components/editor/ImportImageDialog";
 import { PageSvg, ShapeSvg } from "@/components/render/PageSvg";
 import { artworkBounds, hitTest, simplifyPoints, symmetryCopies, type Point, type Symmetry } from "@/lib/geometry";
 import { getPageContext } from "@/lib/layout";
@@ -66,6 +68,7 @@ export function DesignEditor({ project, page, pageCount }: { project: Project; p
   const [draft, setDraft] = React.useState<Shape | null>(null);
   const [text, setText] = React.useState("");
   const [zoom, setZoom] = React.useState(1);
+  const [importing, setImporting] = React.useState(false);
   const [fit, setFit] = React.useState({ width: 0, height: 0 });
   const gesture = React.useRef<{ start: Point; points: number[]; erasing: boolean; before: Shape[] } | null>(null);
   const historyKey = `${project.id}:${item.id}`;
@@ -285,7 +288,19 @@ export function DesignEditor({ project, page, pageCount }: { project: Project; p
               </button>
             </Tooltip>
           ))}
+          <div className="mx-1 w-px bg-neutral-200 md:mx-0 md:my-1 md:h-px md:w-auto" />
+          <Tooltip content="Import image as line art" side="right">
+            <button onClick={() => setImporting(true)} aria-label="Import image" className="rounded-md p-2 text-neutral-600 hover:bg-neutral-100">
+              <ImagePlus className="size-5" />
+            </button>
+          </Tooltip>
         </nav>
+        <ImportImageDialog
+          open={importing}
+          onOpenChange={setImporting}
+          area={{ ...ctx.recommended, xIn: ctx.recommended.xIn - ctx.trim.xIn, yIn: ctx.recommended.yIn - ctx.trim.yIn }}
+          onPlace={(shape) => apply([...shapes, shape])}
+        />
 
         <div ref={viewportRef} className="relative min-h-[50vh] flex-1 overflow-auto">
           <div className="flex min-h-full min-w-full items-center justify-center p-4" style={{ width: fit.width * zoom + 32, height: fit.height * zoom + 32 }}>

@@ -12,7 +12,7 @@ import type { PaperType, TrimSizeId } from "@/lib/kdp";
 import type { Difficulty, SearchEntry, SearchPuzzle } from "@/lib/puzzles/search-grid";
 import { FONT_FAMILIES, cssFontStack, type BookFont } from "@/lib/text-metrics";
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 // ---------------------------------------------------------------------------
 // Vector shapes
@@ -76,7 +76,24 @@ export interface TextShape extends ShapeBase {
   font: BookFont;
 }
 
-export type Shape = PathShape | EllipseShape | RectShape | PolygonShape | TextShape;
+/**
+ * Line art traced from an imported photo or scan: filled vector outlines
+ * (even-odd), never a bitmap. Path data is in source-pixel units and is
+ * scaled into the box (x, y, width, height) in inches.
+ */
+export interface TraceShape extends ShapeBase {
+  type: "trace";
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** Size of the traced bitmap, in pixels. */
+  srcWidth: number;
+  srcHeight: number;
+  pathData: string;
+}
+
+export type Shape = PathShape | EllipseShape | RectShape | PolygonShape | TextShape | TraceShape;
 
 export type { BookFont } from "@/lib/text-metrics";
 
@@ -119,6 +136,29 @@ export interface PuzzleSettings {
   entriesPerPuzzle: number;
 }
 
+export interface CoverSettings {
+  /** Full-bleed background colour (hex). */
+  background: string;
+  /** Title, author and spine text colour (hex). */
+  textColor: string;
+  /** Panel behind the cover art. */
+  panelColor: string;
+  /** Back cover description. */
+  blurb: string;
+  /** Design (coloring) or puzzle shown on the front; null for none. */
+  artItemId: string | null;
+  showSpineText: boolean;
+}
+
+export const DEFAULT_COVER: CoverSettings = {
+  background: "#1f4e79",
+  textColor: "#ffffff",
+  panelColor: "#ffffff",
+  blurb: "",
+  artItemId: null,
+  showSpineText: true,
+};
+
 export interface Project {
   schemaVersion: number;
   id: string;
@@ -133,6 +173,7 @@ export interface Project {
   includeFrontMatter: boolean;
   puzzleSettings: PuzzleSettings | null;
   items: ContentItem[];
+  cover: CoverSettings;
   createdAt: number;
   updatedAt: number;
 }
@@ -189,9 +230,19 @@ export function createProject(input: NewProjectInput): Project {
     includeFrontMatter: true,
     puzzleSettings: profile.puzzle ? { ...profile.puzzle, ...input.puzzleSettings } : null,
     items: input.items ?? [],
+    cover: { ...DEFAULT_COVER, artItemId: input.items?.[0]?.id ?? null },
     createdAt: now,
     updatedAt: now,
   };
+}
+
+/** Brings a project saved by an older version up to the current schema. */
+export function migrateProject(raw: Project): Project {
+  const p = { ...raw } as Project & { cover?: CoverSettings };
+  if (!p.cover) p.cover = { ...DEFAULT_COVER, artItemId: p.items[0]?.id ?? null };
+  else p.cover = { ...DEFAULT_COVER, ...p.cover };
+  p.schemaVersion = SCHEMA_VERSION;
+  return p;
 }
 
 export function createDesign(name: string, addBackingPage = true): DesignItem {

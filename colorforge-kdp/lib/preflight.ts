@@ -145,7 +145,7 @@ export function runPreflight(project: Project, options: PreflightOptions = {}): 
 
   // 4. Line weight ----------------------------------------------------------
   const thin = book.pages.filter(
-    (p) => p.kind === "design" && p.item.shapes.some((s) => !s.erase && s.type !== "text" && s.strokeWidth < MIN_LINE_WEIGHT_IN - 1e-9),
+    (p) => p.kind === "design" && p.item.shapes.some((s) => !s.erase && s.type !== "text" && s.type !== "trace" && s.strokeWidth < MIN_LINE_WEIGHT_IN - 1e-9),
   );
   checks.push({
     id: "line-weight",

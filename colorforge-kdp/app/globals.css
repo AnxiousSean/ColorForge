@@ -1,3 +1,11 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Bundled print fonts (SIL OFL). The PDF export outlines these same files. */
+@font-face { font-family: "Atkinson Hyperlegible"; src: url("/fonts/sans-400.woff") format("woff"); font-weight: 400; font-display: block; }
+@font-face { font-family: "Atkinson Hyperlegible"; src: url("/fonts/sans-700.woff") format("woff"); font-weight: 700; font-display: block; }
+@font-face { font-family: "Lora"; src: url("/fonts/serif-400.woff") format("woff"); font-weight: 400; font-display: block; }
+@font-face { font-family: "Lora"; src: url("/fonts/serif-700.woff") format("woff"); font-weight: 700; font-display: block; }
+@font-face { font-family: "Nunito"; src: url("/fonts/rounded-400.woff") format("woff"); font-weight: 400; font-display: block; }
+@font-face { font-family: "Nunito"; src: url("/fonts/rounded-700.woff") format("woff"); font-weight: 700; font-display: block; }

@@ -1,5 +1,6 @@
 import * as React from "react";
 import { BOOK_FONTS, type Project, type Shape } from "@/lib/model";
+import { cssFontStack, textToPathData } from "@/lib/fonts";
 import { pathData, polygonVertices } from "@/lib/geometry";
 import {
   FRAME_RATIO,
@@ -24,12 +25,19 @@ import type { SearchPuzzle } from "@/lib/puzzles/search-grid";
  */
 
 const INK = "#000";
-const PUZZLE_FONT = BOOK_FONTS.sans.css;
+const PUZZLE_FONT = cssFontStack("sans");
+
+/**
+ * Print mode: every glyph is drawn as a vector path instead of <text>, so
+ * the PDF contains no fonts at all.
+ */
+const OutlineContext = React.createContext(false);
 
 const deg = (rad: number | undefined) => ((rad ?? 0) * 180) / Math.PI;
 const n = (v: number) => Number(v.toFixed(4));
 
 export function ShapeSvg({ shape }: { shape: Shape }) {
+  const outlined = React.useContext(OutlineContext);
   const stroke = shape.erase ? "#fff" : INK;
   const common = {
     stroke,
@@ -69,6 +77,7 @@ export function ShapeSvg({ shape }: { shape: Shape }) {
     case "polygon":
       return <polygon points={polygonVertices(shape).map(([x, y]) => `${n(x)},${n(y)}`).join(" ")} {...common} />;
     case "text":
+      if (outlined) return <path d={textToPathData(shape.text, shape.x, shape.y, shape.fontSize, shape.font, 400)} fill={stroke} />;
       return (
         <text x={n(shape.x)} y={n(shape.y)} fontSize={shape.fontSize} fontFamily={BOOK_FONTS[shape.font].css} fill={stroke}>
           {shape.text}
@@ -78,6 +87,10 @@ export function ShapeSvg({ shape }: { shape: Shape }) {
 }
 
 function Text({ box, family = PUZZLE_FONT }: { box: TextBox; family?: string }) {
+  const outlined = React.useContext(OutlineContext);
+  if (outlined) {
+    return <path d={textToPathData(box.text, box.x, box.y, box.size, "sans", box.weight === "bold" ? 700 : 400, box.anchor)} fill={INK} />;
+  }
   return (
     <text
       x={n(box.x)}
@@ -94,6 +107,7 @@ function Text({ box, family = PUZZLE_FONT }: { box: TextBox; family?: string }) 
 }
 
 function Grid({ grid, puzzle, solution }: { grid: GridLayout; puzzle: SearchPuzzle; solution?: boolean }) {
+  const outlined = React.useContext(OutlineContext);
   const frame = FRAME_RATIO * grid.cell;
   return (
     <g>
@@ -125,23 +139,38 @@ function Grid({ grid, puzzle, solution }: { grid: GridLayout; puzzle: SearchPuzz
         stroke={INK}
         strokeWidth={solution ? 0.01 : 0.02}
       />
-      {puzzle.grid.map((row, r) =>
-        row.map((ch, c) => {
-          const [x, y] = cellCenter(grid, r, c);
-          return (
-            <text
-              key={`${r}-${c}`}
-              x={n(x)}
-              y={n(y + grid.letterSize * 0.36)}
-              fontSize={n(grid.letterSize)}
-              fontFamily={PUZZLE_FONT}
-              textAnchor="middle"
-              fill={INK}
-            >
-              {ch}
-            </text>
-          );
-        }),
+      {outlined ? (
+        // One path for the whole grid: hundreds of glyphs, one PDF object.
+        <path
+          d={puzzle.grid
+            .flatMap((row, r) =>
+              row.map((ch, c) => {
+                const [x, y] = cellCenter(grid, r, c);
+                return textToPathData(ch, x, y + grid.letterSize * 0.36, grid.letterSize, "sans", 400, "middle");
+              }),
+            )
+            .join("")}
+          fill={INK}
+        />
+      ) : (
+        puzzle.grid.map((row, r) =>
+          row.map((ch, c) => {
+            const [x, y] = cellCenter(grid, r, c);
+            return (
+              <text
+                key={`${r}-${c}`}
+                x={n(x)}
+                y={n(y + grid.letterSize * 0.36)}
+                fontSize={n(grid.letterSize)}
+                fontFamily={PUZZLE_FONT}
+                textAnchor="middle"
+                fill={INK}
+              >
+                {ch}
+              </text>
+            );
+          }),
+        )
       )}
     </g>
   );
@@ -261,12 +290,14 @@ export interface PageSvgProps extends Omit<React.SVGProps<SVGSVGElement>, "child
   page: ResolvedPage;
   pageCount: number;
   showOverlay?: boolean;
+  /** Draw text as vector outlines (print/PDF). Requires fonts to be loaded. */
+  outlineText?: boolean;
   /** Extra layers drawn in trim space above the artwork (e.g. a live stroke). */
   children?: React.ReactNode;
 }
 
 export const PageSvg = React.forwardRef<SVGSVGElement, PageSvgProps>(function PageSvg(
-  { project, page, pageCount, showOverlay = false, children, ...rest },
+  { project, page, pageCount, showOverlay = false, outlineText = false, children, ...rest },
   ref,
 ) {
   const ctx = getPageContext(project.trimSize, project.hasBleed, pageCount, page.slot.pageNumber);
@@ -280,7 +311,9 @@ export const PageSvg = React.forwardRef<SVGSVGElement, PageSvgProps>(function Pa
       {...rest}
     >
       <rect width={ctx.page.widthIn} height={ctx.page.heightIn} fill="#fff" />
-      <Content page={page} project={project} ctx={ctx} />
+      <OutlineContext.Provider value={outlineText}>
+        <Content page={page} project={project} ctx={ctx} />
+      </OutlineContext.Provider>
       {children && <g transform={`translate(${ctx.trim.xIn} ${ctx.trim.yIn})`}>{children}</g>}
       {showOverlay && <Overlay ctx={ctx} />}
     </svg>

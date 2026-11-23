@@ -5,6 +5,7 @@
 
 import type { Rect } from "@/lib/kdp";
 import type { EllipseShape, PolygonShape, RectShape, Shape } from "@/lib/model";
+import { measureText } from "@/lib/text-metrics";
 
 export type Point = readonly [x: number, y: number];
 
@@ -103,8 +104,7 @@ function ellipseOutline(s: EllipseShape, steps = 72): Point[] {
   });
 }
 
-/** Approximate text width; the export engine uses real font metrics. */
-export const TEXT_WIDTH_FACTOR = 0.6;
+export { APPROX_WIDTH_FACTOR as TEXT_WIDTH_FACTOR } from "@/lib/text-metrics";
 
 /**
  * Points along the shape's centreline, and whether they form a closed loop.
@@ -124,7 +124,7 @@ export function outline(shape: Shape): { points: Point[]; closed: boolean } {
     case "polygon":
       return { points: polygonVertices(shape), closed: true };
     case "text": {
-      const w = shape.text.length * shape.fontSize * TEXT_WIDTH_FACTOR;
+      const w = measureText(shape.text, shape.fontSize, shape.font, 400);
       const top = shape.y - shape.fontSize * 0.8;
       const bottom = shape.y + shape.fontSize * 0.2;
       return {

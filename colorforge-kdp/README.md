@@ -15,7 +15,7 @@ upload limits.
 | Single-sided | Coloring: ON (each design on a right-hand page, blank back). Puzzles: OFF (double-sided). | Marker bleed-through vs. page economy. |
 | Answer key | Puzzle books get one automatically, starting on a right-hand page (6 per page for letter, 4 for square). | Readers expect it. |
 | Reproducibility | Every book stores a seed and the same seed rebuilds the same puzzles. | Fixing a rejection or reprinting never changes content. |
-| Fonts | Text is converted to vector outlines at export (planned, Step 3). | KDP requires embedded fonts; outlines remove that risk entirely. |
+| Fonts | Bundled OFL fonts (Atkinson Hyperlegible, Lora, Nunito) preview on screen and are converted to vector outlines in the PDF. | KDP requires embedded fonts; a PDF with no fonts at all cannot fail that check. |
 | Spine text | Allowed from 80 pages. | KDP rule. |
 
 ## Roadmap
@@ -27,7 +27,9 @@ upload limits.
       text, white-paint eraser, shape eraser, symmetry/mandala, undo/redo, zoom), margin and bleed
       overlay with live margin warnings, puzzle editor, and puzzle / answer-key / title / copyright
       page renderers
-- [ ] Step 3: Vector PDF export (svg2pdf.js + jsPDF per page, assembled with pdf-lib), text outlined
+- [x] Step 3: Vector PDF export. Pages render through svg2pdf.js + jsPDF and are finalized with pdf-lib
+      (trim/bleed boxes, metadata, unused-font removal). Text is outlined with the bundled fonts, preflight
+      blocks failing books, and the finished file is re-read and verified before download.
 - [ ] Step 4: Preflight report, image-to-line-art tracing, cover wrap export, built-in themed word lists
 
 ## How it fits together
@@ -41,11 +43,25 @@ lib/         pure logic, unit-tested (no React)
   layout.ts      where everything goes on puzzle, answer, title and copyright pages
   pages.ts       maps each physical page to what is drawn on it
   storage.ts     IndexedDB persistence
+  fonts.ts       bundled fonts: exact metrics + text-to-outline
+  preflight.ts   KDP checks that gate export
+  export/        interior.ts (browser render pipeline), finalize.ts (pdf-lib boxes + verification)
   puzzles/       seeded word/number search engine + theme parsing
 store/       Zustand: projects (autosave) and editor (tools, undo/redo)
 components/  render/PageSvg.tsx is the single renderer for previews, thumbnails and (Step 3) PDF
 app/         static routes: /, /book?id=, /book/edit?id=&item=
 ```
+
+## Export pipeline
+
+```
+PageSvg (outlined text)  ->  svg2pdf.js  ->  jsPDF page (exact KDP size)
+                                   x every page, vector only
+pdf-lib: MediaBox/BleedBox/TrimBox per page, strip unused fonts, metadata
+verify: page count, sizes, trim boxes, 0 fonts, 0 raster images, <= 650 MB
+```
+
+A 120-page large-print word search book exports in about 7 seconds (8 MB).
 
 ## Scripts
 

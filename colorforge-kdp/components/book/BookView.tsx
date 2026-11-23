@@ -10,6 +10,7 @@ import { Switch } from "@/components/ui/switch";
 import { Tooltip } from "@/components/ui/tooltip";
 import { KdpTerm } from "@/components/KdpTerm";
 import { PageManager } from "@/components/book/PageManager";
+import { ExportDialog } from "@/components/export/ExportDialog";
 import { BOOK_PROFILES } from "@/lib/book-types";
 import { PAGE_LIMITS, PAPER_TYPES, TRIM_SIZES, getGutterMargin, type PaperType, type TrimSizeId } from "@/lib/kdp";
 import { resolveBook } from "@/lib/pages";
@@ -61,6 +62,7 @@ export function BookView({ id }: { id: string | null }) {
   const { project, loadState } = useOpenProject(id);
   const { updateMeta, updatePuzzleSettings, addDesign, addPuzzle, setAllBacking } = useProjects.getState();
   const book = React.useMemo(() => (project ? resolveBook(project) : null), [project]);
+  const [exporting, setExporting] = React.useState(false);
 
   return (
     <LoadGate loadState={loadState}>
@@ -77,13 +79,10 @@ export function BookView({ id }: { id: string | null }) {
               <h1 className="truncate text-xl font-semibold">{project.title}</h1>
             </div>
             <SaveIndicator />
-            <Tooltip content="PDF export arrives in Step 3.">
-              <span>
-                <Button disabled>
-                  <FileDown /> Export PDF
-                </Button>
-              </span>
-            </Tooltip>
+            <Button onClick={() => setExporting(true)}>
+              <FileDown /> Export PDF
+            </Button>
+            <ExportDialog project={project} open={exporting} onOpenChange={setExporting} />
           </header>
 
           <div className="mt-6 grid gap-6 lg:grid-cols-[300px_1fr]">

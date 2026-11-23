@@ -14,7 +14,7 @@ import {
   type Rect,
   type TrimSizeId,
 } from "@/lib/kdp";
-import { TEXT_WIDTH_FACTOR } from "@/lib/geometry";
+import { measureText, type FontWeight } from "@/lib/text-metrics";
 import type { SearchPuzzle } from "@/lib/puzzles/search-grid";
 
 export interface PageContext {
@@ -54,16 +54,19 @@ export interface TextBox {
   weight?: "normal" | "bold";
 }
 
-export const estimateTextWidth = (text: string, size: number) => text.length * size * TEXT_WIDTH_FACTOR;
+const weightOf = (bold: boolean): FontWeight => (bold ? 700 : 400);
 
-/** Greedy word wrap using the approximate width model. */
-export function wrapText(text: string, size: number, maxWidth: number): string[] {
+/** Width of puzzle/front-matter text (all set in the bundled sans). */
+export const estimateTextWidth = (text: string, size: number, bold = false) => measureText(text, size, "sans", weightOf(bold));
+
+/** Greedy word wrap. */
+export function wrapText(text: string, size: number, maxWidth: number, bold = false): string[] {
   const words = text.split(/\s+/).filter(Boolean);
   const lines: string[] = [];
   let line = "";
   for (const w of words) {
     const candidate = line ? `${line} ${w}` : w;
-    if (line && estimateTextWidth(candidate, size) > maxWidth) {
+    if (line && estimateTextWidth(candidate, size, bold) > maxWidth) {
       lines.push(line);
       line = w;
     } else {
@@ -74,9 +77,27 @@ export function wrapText(text: string, size: number, maxWidth: number): string[]
   return lines;
 }
 
+/**
+ * Wraps into the same number of lines as a greedy wrap, but with lines as
+ * even as possible, so titles never end with one lonely word.
+ */
+export function wrapBalanced(text: string, size: number, maxWidth: number, bold = false): string[] {
+  const greedy = wrapText(text, size, maxWidth, bold);
+  if (greedy.length < 2) return greedy;
+  let lo = 0;
+  let hi = maxWidth;
+  for (let i = 0; i < 20; i++) {
+    const mid = (lo + hi) / 2;
+    if (wrapText(text, size, mid, bold).length <= greedy.length) hi = mid;
+    else lo = mid;
+  }
+  return wrapText(text, size, hi, bold);
+}
+
 /** Largest size (up to `max`) at which `text` fits in `width` on one line. */
-export function fitTextSize(text: string, width: number, max: number, min = max * 0.5): number {
-  const natural = width / Math.max(1, text.length * TEXT_WIDTH_FACTOR);
+export function fitTextSize(text: string, width: number, max: number, min = max * 0.5, bold = false): number {
+  const widthAtOne = estimateTextWidth(text, 1, bold);
+  const natural = widthAtOne > 0 ? width / widthAtOne : max;
   return Math.max(min, Math.min(max, natural));
 }
 
@@ -113,7 +134,7 @@ const PUZZLE = {
 };
 
 export function layoutPuzzlePage(puzzle: Pick<SearchPuzzle, "rows" | "cols">, words: readonly string[], title: string, area: Rect): PuzzlePageLayout {
-  const titleSize = fitTextSize(title, area.widthIn, PUZZLE.titleMax);
+  const titleSize = fitTextSize(title, area.widthIn, PUZZLE.titleMax, PUZZLE.titleMax * 0.5, true);
   const titleBox: TextBox = {
     text: title,
     x: area.xIn + area.widthIn / 2,
@@ -125,8 +146,8 @@ export function layoutPuzzlePage(puzzle: Pick<SearchPuzzle, "rows" | "cols">, wo
 
   const columns = words.length <= 8 ? 2 : words.length <= 21 ? 3 : 4;
   const colWidth = area.widthIn / columns;
-  const longest = words.reduce((m, w) => Math.max(m, w.length), 1);
-  const wordSize = Math.min(PUZZLE.wordSize, (colWidth * 0.92) / (longest * TEXT_WIDTH_FACTOR));
+  const widest = words.reduce((m, w) => Math.max(m, estimateTextWidth(w, 1)), 0.01);
+  const wordSize = Math.min(PUZZLE.wordSize, (colWidth * 0.92) / widest);
   const wordRows = Math.ceil(words.length / columns);
   const wordBlock = wordRows * PUZZLE.wordRow;
 
@@ -214,7 +235,7 @@ export function layoutAnswerKey(
       (slotH - labelSize - pad * 2) / (p.rows + FRAME_RATIO * 2),
     );
     const gw = cell * p.cols;
-    const size = fitTextSize(p.label, slotW - pad * 2, labelSize);
+    const size = fitTextSize(p.label, slotW - pad * 2, labelSize, labelSize * 0.5, true);
     return {
       label: { text: p.label, x: sx + slotW / 2, y: sy + size, size, anchor: "middle", weight: "bold" },
       grid: {
@@ -238,7 +259,7 @@ export function layoutTitlePage(title: string, subtitle: string, author: string,
   const boxes: TextBox[] = [];
   const cx = area.xIn + area.widthIn / 2;
   const titleSize = 0.5;
-  const titleLines = wrapText(title, titleSize, area.widthIn);
+  const titleLines = wrapBalanced(title, titleSize, area.widthIn, true);
   let y = area.yIn + area.heightIn * 0.32;
   for (const line of titleLines) {
     boxes.push({ text: line, x: cx, y, size: titleSize, anchor: "middle", weight: "bold" });
@@ -246,7 +267,7 @@ export function layoutTitlePage(title: string, subtitle: string, author: string,
   }
   if (subtitle) {
     y += 0.1;
-    for (const line of wrapText(subtitle, 0.24, area.widthIn)) {
+    for (const line of wrapBalanced(subtitle, 0.24, area.widthIn)) {
       boxes.push({ text: line, x: cx, y, size: 0.24, anchor: "middle" });
       y += 0.24 * 1.35;
     }

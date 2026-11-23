@@ -10,6 +10,7 @@
 import { BOOK_PROFILES, planBook, type BookPlan, type BookType } from "@/lib/book-types";
 import type { PaperType, TrimSizeId } from "@/lib/kdp";
 import type { Difficulty, SearchEntry, SearchPuzzle } from "@/lib/puzzles/search-grid";
+import { FONT_FAMILIES, cssFontStack, type BookFont } from "@/lib/text-metrics";
 
 export const SCHEMA_VERSION = 1;
 
@@ -77,17 +78,13 @@ export interface TextShape extends ShapeBase {
 
 export type Shape = PathShape | EllipseShape | RectShape | PolygonShape | TextShape;
 
-/**
- * Fonts the export engine bundles and turns into vector outlines, so KDP's
- * embedded-font rule can never fail. The editor previews them with the CSS
- * stacks below.
- */
-export type BookFont = "sans" | "serif" | "rounded";
+export type { BookFont } from "@/lib/text-metrics";
 
+/** Fonts the export engine bundles and turns into vector outlines. */
 export const BOOK_FONTS: Readonly<Record<BookFont, { label: string; css: string }>> = {
-  sans: { label: "Sans", css: "Helvetica, Arial, sans-serif" },
-  serif: { label: "Serif", css: "Georgia, 'Times New Roman', serif" },
-  rounded: { label: "Rounded", css: "'Arial Rounded MT Bold', 'Trebuchet MS', sans-serif" },
+  sans: { label: FONT_FAMILIES.sans.label, css: cssFontStack("sans") },
+  serif: { label: FONT_FAMILIES.serif.label, css: cssFontStack("serif") },
+  rounded: { label: FONT_FAMILIES.rounded.label, css: cssFontStack("rounded") },
 };
 
 // ---------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, it } from "vitest";
 import { isRectInside } from "@/lib/kdp";
-import { FRAME_RATIO, getPageContext, layoutAnswerKey, layoutPuzzlePage, wrapText } from "@/lib/layout";
+import { FRAME_RATIO, getPageContext, layoutAnswerKey, wrapBalanced, layoutPuzzlePage, wrapText } from "@/lib/layout";
 import { createDesign, createProject, summarize } from "@/lib/model";
 import { pageLabel, resolveBook } from "@/lib/pages";
 import { buildPuzzleItems, maxAnswerLength, parseThemes, STARTER_THEMES } from "@/lib/puzzles/themes";
@@ -138,6 +138,13 @@ describe("layout", () => {
         expect(isRectInside(frame, ctx.recommended)).toBe(true);
       }
     }
+  });
+
+  it("balances wrapped titles", () => {
+    const lines = wrapBalanced("Large Print Word Search for Adults", 0.5, 7.25, true);
+    expect(lines.length).toBe(2);
+    const [a, b] = lines.map((l) => l.length);
+    expect(Math.abs(a! - b!)).toBeLessThan(10);
   });
 
   it("wraps long titles", () => {

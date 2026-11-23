@@ -89,9 +89,16 @@ export interface BookPlan {
   issues: KdpIssue[];
 }
 
+export interface PlanContent {
+  id: string;
+  /** Per-item override of the profile's backing-page setting. */
+  addBackingPage?: boolean;
+}
+
 export interface PlanOptions {
   type: BookType;
-  contentCount: number;
+  /** The ordered content items, or just how many there are. */
+  content: readonly PlanContent[] | number;
   trimSize?: TrimSizeId;
   paperType?: PaperType;
   /** Overrides the profile, e.g. a coloring book printed double-sided. */
@@ -118,21 +125,31 @@ export function planBook(options: PlanOptions): BookPlan {
   }
 
   const contentRole: PageRole = options.type === "coloring" ? "design" : "puzzle";
-  for (let i = 0; i < options.contentCount; i++) {
+  const content: readonly PlanContent[] =
+    typeof options.content === "number"
+      ? Array.from({ length: options.content }, (_, i) => ({ id: `${contentRole}-${i + 1}` }))
+      : options.content;
+  const contentCount = content.length;
+
+  let previousHadBacking = false;
+  content.forEach((c, i) => {
+    const addBackingPage = c.addBackingPage ?? backing;
     items.push({
-      id: `${contentRole}-${i + 1}`,
+      id: c.id,
       role: contentRole,
-      addBackingPage: backing,
-      // Single-sided art must sit on right-hand pages so its back is the blank.
-      startOnRecto: backing && i === 0,
+      addBackingPage,
+      // Single-sided art must sit on a right-hand page so its back is the
+      // blank. Only needed when the page before does not already guarantee it.
+      startOnRecto: addBackingPage && (i === 0 || !previousHadBacking),
       contentIndexes: [i],
     });
-  }
+    previousHadBacking = addBackingPage;
+  });
 
   const perPage = profile.answersPerPage[trimSize];
   if (profile.hasAnswerKey && perPage > 0) {
-    for (let start = 0, page = 0; start < options.contentCount; start += perPage, page++) {
-      const indexes = Array.from({ length: Math.min(perPage, options.contentCount - start) }, (_, k) => start + k);
+    for (let start = 0, page = 0; start < contentCount; start += perPage, page++) {
+      const indexes = Array.from({ length: Math.min(perPage, contentCount - start) }, (_, k) => start + k);
       items.push({
         id: `answers-${page + 1}`,
         role: "answer-key",

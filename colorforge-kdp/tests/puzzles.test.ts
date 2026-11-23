@@ -130,7 +130,7 @@ describe("number search", () => {
 
 describe("planBook", () => {
   it("a 100-puzzle word search book passes KDP page checks", () => {
-    const plan = planBook({ type: "word-search", contentCount: 100 });
+    const plan = planBook({ type: "word-search", content: 100 });
     // 2 front matter + 100 puzzles + 17 answer pages (6 per page) = 119 -> 120
     expect(plan.slots).toHaveLength(120);
     expect(plan.issues).toEqual([]);
@@ -138,22 +138,32 @@ describe("planBook", () => {
   });
 
   it("starts the answer key on a right-hand page", () => {
-    const plan = planBook({ type: "number-search", contentCount: 31 });
+    const plan = planBook({ type: "number-search", content: 31 });
     const firstKey = plan.slots.find((s) => s.kind === "content" && s.itemId === "answers-1")!;
     expect(firstKey.pageNumber % 2).toBe(1);
     expect(plan.issues).toEqual([]);
   });
 
   it("puts every coloring design on a right-hand page with a blank back", () => {
-    const plan = planBook({ type: "coloring", contentCount: 30 });
+    const plan = planBook({ type: "coloring", content: 30 });
     const designs = plan.slots.filter((s) => s.kind === "content" && s.itemId.startsWith("design-"));
     expect(designs).toHaveLength(30);
     expect(designs.every((s) => s.pageNumber % 2 === 1)).toBe(true);
     expect(plan.issues).toEqual([]);
   });
 
+  it("keeps later single-sided designs on right-hand pages after a double-sided one", () => {
+    const plan = planBook({
+      type: "coloring",
+      includeFrontMatter: false,
+      content: [{ id: "a" }, { id: "b", addBackingPage: false }, { id: "c" }],
+    });
+    const page = (id: string) => plan.slots.find((s) => s.kind === "content" && s.itemId === id)!.pageNumber;
+    expect([page("a"), page("b"), page("c")]).toEqual([1, 3, 5]);
+  });
+
   it("flags a coloring book that is too short to pad legally", () => {
-    const plan = planBook({ type: "coloring", contentCount: 5 });
+    const plan = planBook({ type: "coloring", content: 5 });
     expect(plan.issues.map((i) => i.code)).toContain("below-minimum");
   });
 });

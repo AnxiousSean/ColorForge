@@ -15,10 +15,13 @@ import {
   inToPx,
   isRectInside,
   validatePageCount,
-  type DesignRef,
+  type PageItem,
+  getRecommendedMargins,
+  validateBlankPages,
+  validateSequence,
 } from "@/lib/kdp";
 
-const designs = (n: number, addBackingPage = true): DesignRef[] =>
+const designs = (n: number, addBackingPage = true): PageItem[] =>
   Array.from({ length: n }, (_, i) => ({ id: `d${i + 1}`, addBackingPage }));
 
 describe("getPageDimensions", () => {
@@ -141,9 +144,9 @@ describe("page sequencing", () => {
   it("20 designs with backing pages make a 40-page PDF", () => {
     const seq = buildPageSequence(designs(20));
     expect(seq).toHaveLength(40);
-    expect(seq.filter((p) => p.kind === "design")).toHaveLength(20);
+    expect(seq.filter((p) => p.kind === "content")).toHaveLength(20);
     // Designs land on recto pages, blanks on verso.
-    expect(seq.every((p) => (p.kind === "design") === (p.pageNumber % 2 === 1))).toBe(true);
+    expect(seq.every((p) => (p.kind === "content") === (p.pageNumber % 2 === 1))).toBe(true);
   });
 
   it("numbers pages from 1 in order", () => {
@@ -152,14 +155,36 @@ describe("page sequencing", () => {
 
   it("respects per-design backing toggles and rounds up to even", () => {
     const seq = buildPageSequence([{ id: "a" }, { id: "b", addBackingPage: false }]);
-    expect(seq.map((p) => p.kind)).toEqual(["design", "backing", "design", "filler"]);
+    expect(seq.map((p) => p.kind)).toEqual(["content", "backing", "content", "filler"]);
   });
 
   it("pads to the 24-page minimum only when asked", () => {
-    expect(countInteriorPages(designs(5))).toBe(10);
-    const padded = buildPageSequence(designs(5), { padToMinimum: true });
+    expect(countInteriorPages(designs(8))).toBe(16);
+    const padded = buildPageSequence(designs(8), { padToMinimum: true });
     expect(padded).toHaveLength(24);
-    expect(padded.slice(10).every((p) => p.kind === "filler")).toBe(true);
+    expect(padded.slice(16).every((p) => p.kind === "filler")).toBe(true);
+    expect(validateSequence(padded)).toEqual([]);
+  });
+
+  it("never pads past KDP's 10-trailing-blank limit", () => {
+    // 5 designs = 10 pages ending in a backing page; at most 8 more blanks fit.
+    const padded = buildPageSequence(designs(5), { padToMinimum: true });
+    expect(padded).toHaveLength(18);
+    expect(validateBlankPages(padded)).toEqual([]);
+    expect(validateSequence(padded).map((i) => i.code)).toEqual(["below-minimum"]);
+  });
+
+  it("starts items flagged startOnRecto on an odd page", () => {
+    const seq = buildPageSequence([
+      { id: "title", addBackingPage: false },
+      { id: "chapter", addBackingPage: false, startOnRecto: true },
+    ]);
+    expect(seq.map((p) => p.kind)).toEqual(["content", "filler", "content", "filler"]);
+    expect(seq[2]).toMatchObject({ itemId: "chapter", pageNumber: 3 });
+  });
+
+  it("puzzle books without backing pages are double-sided", () => {
+    expect(countInteriorPages(designs(50, false))).toBe(50);
   });
 
   it("handles an empty book", () => {
@@ -176,11 +201,51 @@ describe("validatePageCount", () => {
   it("flags short, odd, and oversized books", () => {
     expect(validatePageCount(10).map((i) => i.code)).toEqual(["below-minimum"]);
     expect(validatePageCount(25).map((i) => i.code)).toEqual(["odd-count"]);
-    expect(validatePageCount(830).map((i) => i.code)).toEqual(["above-maximum"]);
+    expect(validatePageCount(592).map((i) => i.code)).toEqual(["above-maximum"]);
+    expect(validatePageCount(590)).toEqual([]);
+    expect(validatePageCount(560, "cream").map((i) => i.code)).toEqual(["above-maximum"]);
   });
 
   it("applies the paper-specific minimum for standard colour", () => {
     expect(validatePageCount(40, "standard-color").map((i) => i.code)).toEqual(["below-minimum"]);
+  });
+});
+
+describe("validateBlankPages", () => {
+  const slot = (kind: "content" | "filler", pageNumber: number) =>
+    kind === "content" ? { kind, pageNumber, itemId: `i${pageNumber}` } : { kind, pageNumber };
+
+  it("allows the normal design/backing alternation", () => {
+    expect(validateBlankPages(buildPageSequence(designs(12)))).toEqual([]);
+  });
+
+  it("flags more than 4 blank pages in a row mid-book", () => {
+    const seq = [1, 2, 3, 4, 5, 6, 7].map((n) => slot(n === 1 || n === 7 ? "content" : "filler", n));
+    const issues = validateBlankPages(seq);
+    expect(issues.map((i) => i.code)).toEqual(["blank-run"]);
+    expect(issues[0]!.pages).toEqual([2, 3, 4, 5, 6]);
+  });
+
+  it("flags more than 10 trailing blank pages", () => {
+    const seq = Array.from({ length: 12 }, (_, i) => slot(i === 0 ? "content" : "filler", i + 1));
+    expect(validateBlankPages(seq).map((i) => i.code)).toEqual(["trailing-blanks"]);
+  });
+
+  it("flags a book with no content", () => {
+    expect(validateBlankPages([slot("filler", 1), slot("filler", 2)]).map((i) => i.code)).toEqual(["no-content"]);
+  });
+});
+
+describe("recommended margins", () => {
+  it("adds 0.5 in from trim on the outside and extra gutter room", () => {
+    expect(getRecommendedMargins(40, false)).toEqual({ topIn: 0.5, bottomIn: 0.5, outsideIn: 0.5, gutterIn: 0.5 });
+    expect(getRecommendedMargins(40, true).outsideIn).toBe(0.625);
+  });
+
+  it("recommended safe area sits inside the KDP minimum safe area", () => {
+    for (const page of [1, 2]) {
+      expect(isRectInside(getSafeArea("letter", true, 200, page, "recommended"), getSafeArea("letter", true, 200, page))).toBe(true);
+    }
   });
 });
 

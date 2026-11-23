@@ -77,33 +77,39 @@ export interface PaperSpec {
   label: string;
   /** Thickness per page in inches. Used to work out the spine width. */
   thicknessPerPageIn: number;
-  minPages: number;
-  maxPages: number;
 }
 
-/**
- * KDP paperback paper stocks. Page limits are KDP's published maximums for
- * large trims like 8.5" × 11"; check them against the KDP help pages again
- * before relying on edge cases.
- */
 export const PAPER_TYPES: Readonly<Record<PaperType, PaperSpec>> = {
-  white: { id: "white", label: "Black ink, white paper", thicknessPerPageIn: 0.002252, minPages: 24, maxPages: 828 },
-  cream: { id: "cream", label: "Black ink, cream paper", thicknessPerPageIn: 0.0025, minPages: 24, maxPages: 776 },
-  "standard-color": {
-    id: "standard-color",
-    label: "Standard color, white paper",
-    thicknessPerPageIn: 0.002252,
-    minPages: 72,
-    maxPages: 600,
+  white: { id: "white", label: "Black ink, white paper", thicknessPerPageIn: 0.002252 },
+  cream: { id: "cream", label: "Black ink, cream paper", thicknessPerPageIn: 0.0025 },
+  "standard-color": { id: "standard-color", label: "Standard color, white paper", thicknessPerPageIn: 0.002252 },
+  "premium-color": { id: "premium-color", label: "Premium color, white paper", thicknessPerPageIn: 0.002347 },
+};
+
+/**
+ * KDP page-count limits per trim size and paper, from KDP's Trim Size
+ * Specifications table (8.5" x 11" row). The 8.5" x 8.5" square trim falls
+ * in the same large-trim band.
+ */
+export const PAGE_LIMITS: Readonly<Record<TrimSizeId, Record<PaperType, { min: number; max: number }>>> = {
+  letter: {
+    white: { min: 24, max: 590 },
+    cream: { min: 24, max: 550 },
+    "standard-color": { min: 72, max: 600 },
+    "premium-color": { min: 24, max: 590 },
   },
-  "premium-color": {
-    id: "premium-color",
-    label: "Premium color, white paper",
-    thicknessPerPageIn: 0.002347,
-    minPages: 24,
-    maxPages: 828,
+  square: {
+    white: { min: 24, max: 590 },
+    cream: { min: 24, max: 550 },
+    "standard-color": { min: 72, max: 600 },
+    "premium-color": { min: 24, max: 590 },
   },
 };
+
+/** KDP rejects more than 4 blank pages in a row at the start or middle... */
+export const MAX_CONSECUTIVE_BLANK_PAGES = 4;
+/** ...or more than 10 blank pages in a row at the end. */
+export const MAX_TRAILING_BLANK_PAGES = 10;
 
 export const DEFAULT_PAPER_TYPE: PaperType = "white";
 
@@ -251,6 +257,28 @@ export function getSafeMargins(pageCount: number, hasBleed: boolean): Margins {
   };
 }
 
+/** Extra room on top of KDP's minimums, measured from the trim line. */
+export const COMFORT_OUTSIDE_FROM_TRIM_IN = 0.5;
+export const COMFORT_GUTTER_EXTRA_IN = 0.125;
+
+/**
+ * The margins the app lays content out to by default. KDP's minimums
+ * (`getSafeMargins`) are the hard limit; this adds breathing room so:
+ * - small trim drift at the printer never clips a line,
+ * - colorers can reach artwork near the spine,
+ * - puzzle grids are not squeezed into the binding.
+ * Content between the two lines only triggers a preflight warning.
+ */
+export function getRecommendedMargins(pageCount: number, hasBleed: boolean): Margins {
+  const outside = COMFORT_OUTSIDE_FROM_TRIM_IN + (hasBleed ? BLEED_IN : 0);
+  return {
+    topIn: outside,
+    bottomIn: outside,
+    outsideIn: outside,
+    gutterIn: getGutterMargin(pageCount) + COMFORT_GUTTER_EXTRA_IN,
+  };
+}
+
 /**
  * The area of a page where artwork is guaranteed not to be cut off or lost
  * in the binding. Everything a user draws must fit inside it unless it is
@@ -261,9 +289,10 @@ export function getSafeArea(
   hasBleed: boolean,
   pageCount: number,
   pageNumber: number,
+  level: "kdp-minimum" | "recommended" = "kdp-minimum",
 ): Rect {
   const page = getPageDimensions(trimSize, hasBleed);
-  const m = getSafeMargins(pageCount, hasBleed);
+  const m = level === "recommended" ? getRecommendedMargins(pageCount, hasBleed) : getSafeMargins(pageCount, hasBleed);
   const left = getPageSide(pageNumber) === "recto" ? m.gutterIn : m.outsideIn;
   return {
     xIn: left,
@@ -284,42 +313,63 @@ export function isRectInside(inner: Rect, outer: Rect, epsilonIn = 1e-6): boolea
 }
 
 // ---------------------------------------------------------------------------
-// Page sequencing (designs plus blank backing pages)
+// Page sequencing (content pages, blank backing pages, filler)
 // ---------------------------------------------------------------------------
 
-export interface DesignRef {
+export interface PageItem {
   id: string;
-  /** Print a blank page behind this design. Defaults to true. */
+  /**
+   * Print a blank page behind this item. Coloring designs default to true so
+   * markers cannot bleed through; puzzle books turn it off.
+   */
   addBackingPage?: boolean;
+  /** Always start this item on a right-hand page (e.g. the title page). */
+  startOnRecto?: boolean;
 }
 
 export type PageSlot =
-  | { kind: "design"; pageNumber: number; designId: string }
-  | { kind: "backing"; pageNumber: number; designId: string }
-  /** Blank page added to reach an even count or the KDP minimum. */
+  | { kind: "content"; pageNumber: number; itemId: string }
+  /** Intentional blank behind a single-sided design. */
+  | { kind: "backing"; pageNumber: number; itemId: string }
+  /** Blank page added for parity, the KDP minimum, or recto alignment. */
   | { kind: "filler"; pageNumber: number };
 
 export interface PageSequenceOptions {
-  /** Add blank pages at the end until the book has at least 24 pages. */
+  /**
+   * Add blank pages at the end until the book has at least `minPages`.
+   * Never adds more than KDP's trailing-blank limit allows; preflight
+   * reports any remaining shortfall.
+   */
   padToMinimum?: boolean;
+  minPages?: number;
 }
 
+const isBlank = (s: PageSlot) => s.kind !== "content";
+
 /**
- * Lays out the physical interior pages. Coloring books print single-sided,
- * so by default every design is followed by a blank backing page:
- * 20 designs make 40 pages. The total is always rounded up to an even number.
+ * Lays out the physical interior pages, in order. 20 coloring designs with
+ * backing pages make 40 pages. The total is always rounded up to even.
  */
-export function buildPageSequence(designs: readonly DesignRef[], options: PageSequenceOptions = {}): PageSlot[] {
+export function buildPageSequence(items: readonly PageItem[], options: PageSequenceOptions = {}): PageSlot[] {
   const slots: PageSlot[] = [];
-  for (const d of designs) {
-    slots.push({ kind: "design", pageNumber: slots.length + 1, designId: d.id });
-    if (d.addBackingPage !== false) {
-      slots.push({ kind: "backing", pageNumber: slots.length + 1, designId: d.id });
-    }
+  const next = () => slots.length + 1;
+
+  for (const item of items) {
+    if (item.startOnRecto && next() % 2 === 0) slots.push({ kind: "filler", pageNumber: next() });
+    slots.push({ kind: "content", pageNumber: next(), itemId: item.id });
+    if (item.addBackingPage !== false) slots.push({ kind: "backing", pageNumber: next(), itemId: item.id });
   }
 
-  const target = getFinalPageCount(slots.length, options.padToMinimum ?? false);
-  while (slots.length < target) slots.push({ kind: "filler", pageNumber: slots.length + 1 });
+  let target = getFinalPageCount(slots.length);
+  if (options.padToMinimum && slots.length > 0) {
+    const minPages = options.minPages ?? MIN_INTERIOR_PAGES;
+    const trailing = countTrailingBlanks(slots);
+    // Keep the padded total even while staying within the trailing limit.
+    let maxPadded = slots.length + Math.max(0, MAX_TRAILING_BLANK_PAGES - trailing);
+    if (maxPadded % 2 !== 0) maxPadded -= 1;
+    target = Math.max(target, Math.min(getFinalPageCount(minPages), maxPadded));
+  }
+  while (slots.length < target) slots.push({ kind: "filler", pageNumber: next() });
   return slots;
 }
 
@@ -330,51 +380,111 @@ export function getFinalPageCount(rawPageCount: number, padToMinimum = false): n
   return floor % 2 === 0 ? floor : floor + 1;
 }
 
-/** Number of interior pages the given designs produce. */
-export function countInteriorPages(designs: readonly DesignRef[], options: PageSequenceOptions = {}): number {
-  return buildPageSequence(designs, options).length;
+/** Number of interior pages the given items produce. */
+export function countInteriorPages(items: readonly PageItem[], options: PageSequenceOptions = {}): number {
+  return buildPageSequence(items, options).length;
+}
+
+function countTrailingBlanks(slots: readonly PageSlot[]): number {
+  let n = 0;
+  for (let i = slots.length - 1; i >= 0 && isBlank(slots[i]!); i--) n++;
+  return n;
 }
 
 // ---------------------------------------------------------------------------
-// Page-count validation (used by preflight)
+// Validation (used by preflight)
 // ---------------------------------------------------------------------------
 
 export type IssueSeverity = "error" | "warning";
 
-export interface PageCountIssue {
-  code: "below-minimum" | "odd-count" | "above-maximum";
+export interface KdpIssue {
+  code: "below-minimum" | "odd-count" | "above-maximum" | "blank-run" | "trailing-blanks" | "no-content";
   severity: IssueSeverity;
   message: string;
+  /** Pages the issue applies to, if it is page-specific. */
+  pages?: number[];
 }
 
-export function validatePageCount(pageCount: number, paperType: PaperType = DEFAULT_PAPER_TYPE): PageCountIssue[] {
+export function validatePageCount(
+  pageCount: number,
+  paperType: PaperType = DEFAULT_PAPER_TYPE,
+  trimSize: TrimSizeId = DEFAULT_TRIM_SIZE,
+): KdpIssue[] {
   assertPageCount(pageCount);
   const paper = PAPER_TYPES[paperType];
-  const minPages = Math.max(MIN_INTERIOR_PAGES, paper.minPages);
-  const issues: PageCountIssue[] = [];
+  const limits = PAGE_LIMITS[getTrimSize(trimSize).id][paperType];
+  const issues: KdpIssue[] = [];
 
-  if (pageCount < minPages) {
+  if (pageCount < limits.min) {
     issues.push({
       code: "below-minimum",
       severity: "error",
-      message: `KDP needs at least ${minPages} interior pages for ${paper.label.toLowerCase()}; this book has ${pageCount}.`,
+      message: `KDP needs at least ${limits.min} interior pages for ${paper.label.toLowerCase()}; this book has ${pageCount}.`,
     });
   }
   if (pageCount % 2 !== 0) {
-    issues.push({
-      code: "odd-count",
-      severity: "error",
-      message: `Page count must be even; this book has ${pageCount}.`,
-    });
+    issues.push({ code: "odd-count", severity: "error", message: `Page count must be even; this book has ${pageCount}.` });
   }
-  if (pageCount > paper.maxPages) {
+  if (pageCount > limits.max) {
     issues.push({
       code: "above-maximum",
       severity: "error",
-      message: `KDP allows at most ${paper.maxPages} pages for ${paper.label.toLowerCase()}; this book has ${pageCount}.`,
+      message: `KDP allows at most ${limits.max} pages at this trim size for ${paper.label.toLowerCase()}; this book has ${pageCount}.`,
     });
   }
   return issues;
+}
+
+/**
+ * KDP rejects manuscripts with more than 4 blank pages in a row at the start
+ * or middle, or more than 10 at the end.
+ */
+export function validateBlankPages(slots: readonly PageSlot[]): KdpIssue[] {
+  if (slots.length === 0) return [];
+  if (slots.every(isBlank)) {
+    return [{ code: "no-content", severity: "error", message: "The book has no content pages." }];
+  }
+
+  const issues: KdpIssue[] = [];
+  const trailing = countTrailingBlanks(slots);
+  const body = slots.slice(0, slots.length - trailing);
+
+  let run: number[] = [];
+  const flush = () => {
+    if (run.length > MAX_CONSECUTIVE_BLANK_PAGES) {
+      issues.push({
+        code: "blank-run",
+        severity: "error",
+        message: `Pages ${run[0]}–${run[run.length - 1]} are ${run.length} blank pages in a row; KDP allows at most ${MAX_CONSECUTIVE_BLANK_PAGES}.`,
+        pages: [...run],
+      });
+    }
+    run = [];
+  };
+  for (const s of body) {
+    if (isBlank(s)) run.push(s.pageNumber);
+    else flush();
+  }
+  flush();
+
+  if (trailing > MAX_TRAILING_BLANK_PAGES) {
+    issues.push({
+      code: "trailing-blanks",
+      severity: "error",
+      message: `The book ends with ${trailing} blank pages; KDP allows at most ${MAX_TRAILING_BLANK_PAGES}. Add more content instead of padding.`,
+      pages: slots.slice(slots.length - trailing).map((s) => s.pageNumber),
+    });
+  }
+  return issues;
+}
+
+/** Every page-count and blank-page check for a laid-out book. */
+export function validateSequence(
+  slots: readonly PageSlot[],
+  paperType: PaperType = DEFAULT_PAPER_TYPE,
+  trimSize: TrimSizeId = DEFAULT_TRIM_SIZE,
+): KdpIssue[] {
+  return [...validatePageCount(slots.length, paperType, trimSize), ...validateBlankPages(slots)];
 }
 
 // ---------------------------------------------------------------------------

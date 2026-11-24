@@ -1,116 +1,88 @@
-# Ortex
+# ColorForge KDP
 
-**Multi-agent autonomous penetration-testing framework — foundational scaffold.**
+A browser-based studio for publishing KDP-ready **coloring books, word search books and number
+search books**, fast enough to ship one book a day. Everything runs on the client: no server, no
+upload limits.
 
-Ortex is a Go backend that embeds a Next.js web console, persists a dual-graph
-state in PostgreSQL, and orchestrates a Planner/Worker multi-agent engine. It is
-architecturally inspired by the Artex project.
+## Publishing decisions (built into the code)
 
-> ⚠️ **Authorized, isolated-lab use only.** Ortex is for legitimate security
-> research and red-team exercises against systems you own or are **explicitly
-> authorized** to test. Do not use it to access systems without permission.
+| Decision | Choice | Why |
+| --- | --- | --- |
+| Bleed | **Off** by default for every book type | Line art and puzzle grids don't need it, and it rules out a whole class of rejections. Still available per book. |
+| Margins | KDP minimums are the hard limit (error). Layout uses **recommended** margins: 0.5" from trim, plus 0.125" extra gutter (warning only if crossed). | Room for printer trim drift, reaching art near the spine, and grids clear of the binding. |
+| Page limits | From KDP's trim-size table: 8.5" × 11" white 24–590, cream 24–550, standard colour 72–600, premium colour 24–590. | The first draft's 828 cap only applies to smaller trims. |
+| Blank pages | Max 4 blank pages in a row mid-book and 10 at the end (KDP rule). Padding to 24 pages is automatic but never breaks this; below that, preflight asks for more content. | Padding a thin book with blanks gets rejected and draws bad reviews. |
+| Single-sided | Coloring: ON (each design on a right-hand page, blank back). Puzzles: OFF (double-sided). | Marker bleed-through vs. page economy. |
+| Answer key | Puzzle books get one automatically, starting on a right-hand page (6 per page for letter, 4 for square). | Readers expect it. |
+| Reproducibility | Every book stores a seed and the same seed rebuilds the same puzzles. | Fixing a rejection or reprinting never changes content. |
+| Fonts | Bundled OFL fonts (Atkinson Hyperlegible, Lora, Nunito) preview on screen and are converted to vector outlines in the PDF. | KDP requires embedded fonts; a PDF with no fonts at all cannot fail that check. |
+| Spine text | Allowed from 80 pages. | KDP rule. |
 
-## Safety model
+## Roadmap
 
-Safety is structural, not optional:
+- [x] Step 1: Scaffolding, KDP math (`lib/kdp.ts`), book profiles and page planner (`lib/book-types.ts`),
+      seeded word search and number search engine (`lib/puzzles/search-grid.ts`)
+- [x] Step 2: Dashboard + "New book" wizard, IndexedDB autosave, page manager (drag-and-drop,
+      blank-back toggles, spread view), SVG coloring editor (pen, line, rectangle, ellipse, polygon,
+      text, white-paint eraser, shape eraser, symmetry/mandala, undo/redo, zoom), margin and bleed
+      overlay with live margin warnings, puzzle editor, and puzzle / answer-key / title / copyright
+      page renderers
+- [x] Step 3: Vector PDF export. Pages render through svg2pdf.js + jsPDF and are finalized with pdf-lib
+      (trim/bleed boxes, metadata, unused-font removal). Text is outlined with the bundled fonts, preflight
+      blocks failing books, and the finished file is re-read and verified before download.
+- [x] Step 4: Live preflight panel with page links, image-to-line-art tracing (ink and photo-outline
+      modes, fully vector), cover designer with full-wrap PDF (spine from page count, barcode area)
+      and 300 DPI front-cover PNG, 51-theme word library with a theme picker
 
-- **Authorized scope is mandatory.** Every task must declare its rules of
-  engagement (`authorized_scope`); the framework refuses to start a task without
-  one.
-- **Human-in-the-loop approval gate.** Any intent classified as `exploitation`
-  or `exfiltration` **blocks** in the engine until an operator approves or denies
-  it from the console. There is no path around the gate.
-- **Full audit trail.** Every agent and operator action is written to an
-  append-only `audit_log` table and is traceable per task.
-- **Mock action tools.** In this scaffold the action-performing tools
-  (`execute_recon`, etc.) are **mocks**: they return simulated findings and
-  perform no real network activity or attacks.
-- **No hardcoded secrets.** All configuration comes from environment variables;
-  the web console is authenticated.
-
-## Architecture
+## How it fits together
 
 ```
-cmd/backend        entrypoint: config → store → migrate → engine → HTTP server
-cmd/hashpw         helper to generate an operator bcrypt password hash
-internal/config    env-var configuration + validation
-internal/state     dual-graph models, Store interface, Postgres + in-memory impls, migrations
-internal/llm       provider interface, deterministic mock, Anthropic/OpenAI stubs
-internal/tools     strictly-typed, validated, LLM-callable toolset
-internal/agent     Planner (sole intent generator), Worker, MainAgent
-internal/engine    plannerLoop + N workers, claim/timeout/pause/resume/drain, approval gate
-internal/httpapi   JSON API, session auth, task + approval endpoints
-internal/web       embeds the Next.js export (go:embed) and serves it
-web                Next.js console (static export → internal/web/dist)
+lib/         pure logic, unit-tested (no React)
+  kdp.ts         book math: page sizes, bleed, margins, page sequencing, KDP rules
+  book-types.ts  book profiles + planBook(): front matter, content, answer key
+  model.ts       project / design / puzzle data model (art stored in trim-space inches)
+  geometry.ts    smoothing, bounds, hit-testing, symmetry transforms
+  layout.ts      where everything goes on puzzle, answer, title and copyright pages
+  pages.ts       maps each physical page to what is drawn on it
+  storage.ts     IndexedDB persistence
+  fonts.ts       bundled fonts: exact metrics + text-to-outline
+  preflight.ts   KDP checks that gate export
+  export/        interior.ts + cover.ts (browser render), finalize.ts (pdf-lib boxes + verification)
+  trace.ts       bitmap -> vector line art (threshold / colour edges, marching squares)
+  cover.ts       cover wrap geometry and layout
+  puzzles/library.ts  51 built-in themes
+  puzzles/       seeded word/number search engine + theme parsing
+store/       Zustand: projects (autosave) and editor (tools, undo/redo)
+components/  render/PageSvg.tsx is the single renderer for previews, thumbnails and (Step 3) PDF
+app/         static routes: /, /book?id=, /book/edit?id=&item=, /book/cover?id=
 ```
 
-### Dual-graph state
+## Export pipeline
 
-- **AssetGraph** — discovered entities (hosts, services, credentials, vulns) and
-  their relationships.
-- **ExplorationGraph** — investigation progress (goals, dispatched intents,
-  outcomes). The planner reads this to avoid re-exploring covered directions.
+```
+PageSvg (outlined text)  ->  svg2pdf.js  ->  jsPDF page (exact KDP size)
+                                   x every page, vector only
+pdf-lib: MediaBox/BleedBox/TrimBox per page, strip unused fonts, metadata
+verify: page count, sizes, trim boxes, 0 fonts, 0 raster images, <= 650 MB
+```
 
-Both graphs are persisted in PostgreSQL for session resumption and auditability.
+A 120-page large-print word search book exports in about 7 seconds (8 MB).
 
-### Orchestration
+## Publishing a book
 
-The **Planner** is the sole generator of intents: it reads the exploration graph
-and dispatches a new intent into the frontier only for a direction not already
-covered (deduplicated by key). **Workers** each claim one frontier intent
-(`FOR UPDATE SKIP LOCKED`), execute it via the toolset, and write results back —
-which triggers the next planner cycle. The **MainAgent** turns an operator
-objective into a task and surfaces pending approvals.
+1. **New book** → pick a type and themes (or designs) → Create.
+2. Fix anything the preflight panel flags (each page number links to its editor).
+3. **Export PDF** → upload as the paperback manuscript.
+4. **Cover** → pick colours and art, add a description → **Cover PDF** (upload as
+   "a cover you already have") and **Front PNG** (listing images, Kindle edition).
+   Export the cover last: the spine width depends on the final page count.
 
-## Quick start (Docker)
+## Scripts
 
 ```bash
-docker compose up --build
-# console + API on http://localhost:8080
-# demo login — operator / ortex-demo   (change these for real use)
+npm install
+npm run dev        # http://localhost:3000
+npm test           # unit tests (Vitest)
+npm run typecheck
+npm run build
 ```
-
-Run the end-to-end smoke test (health + embedded frontend + auth gate):
-
-```bash
-make smoke
-```
-
-## Local development
-
-```bash
-# 1. Build the web console into the embed directory
-make web
-
-# 2. Build / run the backend (in-memory store, mock LLM — no DB needed)
-ORTEX_USE_MEMORY_STORE=true \
-ORTEX_SESSION_SECRET="$(openssl rand -base64 32)" \
-ORTEX_OPERATOR_USER=operator \
-ORTEX_OPERATOR_PASSWORD_HASH="$(go run ./cmd/hashpw 'ortex-demo')" \
-make run
-
-# 3. Tests + vet
-make test
-make vet
-```
-
-## Configuration
-
-See [`.env.example`](./.env.example) for all settings. Required: a session
-secret, an operator username, and a bcrypt operator password hash
-(`go run ./cmd/hashpw '<password>'`). PostgreSQL is required unless
-`ORTEX_USE_MEMORY_STORE=true`.
-
-## LLM providers
-
-The `llm.Provider` interface abstracts the model backend. The scaffold ships a
-deterministic **mock** provider used by all tests. Real **Anthropic** and
-**OpenAI** adapters are stubbed behind the interface; enabling one requires
-network egress to the provider and an API key supplied via your secret store
-(never hardcoded).
-
-## License / responsible use
-
-Use Ortex only where you have explicit written authorization. The authors
-provide it for defensive research and sanctioned red-team work; misuse is your
-responsibility.
